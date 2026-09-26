@@ -54,6 +54,19 @@ class SQLiteRepository:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY(actor_id, idem_key)
                 );
+                CREATE TABLE IF NOT EXISTS whereabouts_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    whereabouts_id TEXT NOT NULL,
+                    version_no INTEGER NOT NULL,
+                    location TEXT NOT NULL,
+                    window_starts_at TEXT NOT NULL,
+                    window_ends_at TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(whereabouts_id, version_no)
+                );
+                CREATE INDEX IF NOT EXISTS idx_versions_whereabouts
+                    ON whereabouts_versions(whereabouts_id, version_no);
             """)
 
     @staticmethod
@@ -195,6 +208,56 @@ class SQLiteRepository:
                 "VALUES (?, ?, ?, ?)",
                 (actor_id, idem_key, entity_id, utcnow()),
             )
+
+    def append_whereabouts_version(self, whereabouts_id, version_no, data, actor_id, created_at=None):
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO whereabouts_versions"
+                "(whereabouts_id, version_no, location, window_starts_at, window_ends_at, created_by, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    whereabouts_id,
+                    version_no,
+                    data["location"],
+                    data["window_starts_at"],
+                    data["window_ends_at"],
+                    actor_id,
+                    created_at or utcnow(),
+                ),
+            )
+        return self.get_whereabouts_version(whereabouts_id, version_no)
+
+    def get_whereabouts_version(self, whereabouts_id, version_no):
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM whereabouts_versions WHERE whereabouts_id = ? AND version_no = ?",
+                (whereabouts_id, version_no),
+            ).fetchone()
+        return self._version_from_row(row) if row else None
+
+    def list_whereabouts_versions(self, whereabouts_id):
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM whereabouts_versions WHERE whereabouts_id = ? ORDER BY version_no",
+                (whereabouts_id,),
+            ).fetchall()
+        return [self._version_from_row(row) for row in rows]
+
+    @staticmethod
+    def _version_from_row(row):
+        return {
+            "whereabouts_id": row["whereabouts_id"],
+            "version_no": int(row["version_no"]),
+            "location": row["location"],
+            "window_starts_at": row["window_starts_at"],
+            "window_ends_at": row["window_ends_at"],
+            "created_by": row["created_by"],
+            "created_at": row["created_at"],
+        }
+
+    def execute_raw(self, sql, params=()):
+        with self._connect() as connection:
+            connection.execute(sql, tuple(params))
 
     def ping(self):
         with self._connect() as connection:

@@ -85,6 +85,33 @@ def create_handler(service, rules, static_dir):
                         return self._send_html(200, handle.read())
                 if parts == ["api", "audit"]:
                     return self._send(200, {"items": service.audit_log()})
+                if parts == ["api", "dashboard"]:
+                    return self._send(200, service.dashboard())
+                if parts == ["api", "miss-count"]:
+                    query = parse_qs(parsed.query)
+                    athlete_id = query.get("athlete_id", [None])[0]
+                    if not athlete_id:
+                        raise ValidationError("athlete_id is required")
+                    at = query.get("at", [None])[0]
+                    return self._send(200, service.miss_count(athlete_id, at=at))
+                if len(parts) == 3 and parts[1] == "whereabouts" and parts[2] == "effective":
+                    query = parse_qs(parsed.query)
+                    athlete_id = query.get("athlete_id", [None])[0]
+                    period = query.get("period", [None])[0]
+                    check_at = query.get("check_at", [None])[0]
+                    if not (athlete_id and period and check_at):
+                        raise ValidationError(
+                            "athlete_id, period and check_at query params are required"
+                        )
+                    return self._send(
+                        200,
+                        service.effective_whereabouts(athlete_id, period, check_at),
+                    )
+                if len(parts) == 4 and parts[1] == "whereabouts" and parts[3] == "versions":
+                    return self._send(
+                        200,
+                        {"items": service.whereabouts_versions(parts[2])},
+                    )
                 if len(parts) == 3 and parts[:2] == ["api", "entities"]:
                     return self._send(200, service.get(parts[2]))
                 if len(parts) >= 2 and parts[0] == "api":

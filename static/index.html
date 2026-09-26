@@ -6,28 +6,114 @@
   <title>反兴奋剂检测与结果管理</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; }
-    main { max-width: 820px; margin: auto; }
+    main { max-width: 980px; margin: auto; }
     pre { background: #f3f4f6; padding: 1rem; border-radius: 8px; overflow-x: auto; }
     button { padding: .5rem .8rem; cursor: pointer; }
+    table { border-collapse: collapse; width: 100%; margin: .5rem 0 1.5rem; font-size: .9rem; }
+    th, td { border: 1px solid #d1d5db; padding: .4rem .6rem; text-align: left; vertical-align: top; }
+    th { background: #eef2ff; }
+    h2 { margin-top: 2rem; border-bottom: 2px solid #e5e7eb; padding-bottom: .3rem; }
+    .tag { display: inline-block; border-radius: 999px; padding: 0 .55rem; font-size: .75rem; }
+    .closed, .cancelled { background: #e5e7eb; color: #374151; }
+    .active, .planned { background: #dbeafe; color: #1e40af; }
+    .executed { background: #dcfce7; color: #166534; }
+    .pending_review { background: #fee2e2; color: #991b1b; }
+    .miss { color: #b91c1c; font-weight: 600; }
+    .hit { color: #166534; font-weight: 600; }
   </style>
 </head>
 <body>
 <main>
   <h1>反兴奋剂检测与结果管理</h1>
-  <p>这是最小演示页面。使用浏览器或 curl 调用 JSON API。</p>
-  <p><button onclick="checkHealth()">检查服务状态</button></p>
+  <p>季度行踪申报接入赛外检查派单：运动员每期申报一个 60 分钟可检查时段和地点，改址保留全部旧版本；季度关档后不可补写。检查员按检查日期读取有效版本派单。</p>
+  <p>
+    <button onclick="checkHealth()">检查服务状态</button>
+    <button onclick="loadDashboard()">加载行踪/派单总览</button>
+  </p>
   <pre id="result">等待操作</pre>
+
+  <h2>行踪版本（按运动员 × 季度）</h2>
+  <table>
+    <thead><tr><th>运动员</th><th>季度</th><th>状态</th><th>当前版本</th><th>版本数</th><th>当前地点</th><th>60 分钟时段</th></tr></thead>
+    <tbody id="whereabouts-body"><tr><td colspan="7">点击“加载行踪/派单总览”</td></tr></tbody>
+  </table>
+
+  <h2>派单（快照派单时的有效版本）</h2>
+  <table>
+    <thead><tr><th>运动员</th><th>季度</th><th>检查时间</th><th>地点</th><th>引用版本</th><th>状态</th><th>结果</th><th>待审案件</th></tr></thead>
+    <tbody id="dispatches-body"><tr><td colspan="8">—</td></tr></tbody>
+  </table>
+
+  <h2>累计次数（滚动 12 个月）</h2>
+  <table>
+    <thead><tr><th>运动员</th><th>状态</th><th>派单总数</th><th>未命中累计</th><th>近 12 个月未命中</th><th>待审案件</th></tr></thead>
+    <tbody id="counts-body"><tr><td colspan="6">—</td></tr></tbody>
+  </table>
+
   <h2>常用接口</h2>
-  <pre>GET  /health
-GET  /api/&lt;kind&gt;
-POST /api/&lt;kind&gt;
-GET  /api/entities/&lt;id&gt;
-POST /api/entities/&lt;id&gt;/actions</pre>
+  <pre>POST /api/whereabouts                    运动员申报：athlete_id, period(2026-Q3), location, window_starts_at
+POST /api/entities/&lt;id&gt;/actions         {action: "amend"|"close", ...}   改址留版本 / 季度关档
+GET  /api/whereabouts/effective?athlete_id=&amp;period=&amp;check_at=   按检查日期读取有效版本
+GET  /api/whereabouts/&lt;id&gt;/versions      全部历史版本
+POST /api/dispatches                     检查员派单：athlete_id, period, check_at（地点缺失/时段已过返回 400）
+POST /api/entities/&lt;id&gt;/actions         {action: "execute", data:{outcome:"hit"|"miss"}} / {action:"cancel"}
+GET  /api/miss-count?athlete_id=         滚动 12 个月未命中次数
+GET  /api/dashboard                      本页总览数据</pre>
 </main>
 <script>
+function esc(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function tag(value) {
+  const cls = String(value || '').replace(/_/g, '_');
+  return '<span class="tag ' + esc(cls) + '">' + esc(value || '-') + '</span>';
+}
 async function checkHealth() {
   const response = await fetch('/health');
   document.getElementById('result').textContent = JSON.stringify(await response.json(), null, 2);
+}
+function athleteName(board, id) {
+  const found = (board.athletes || []).find(a => a.athlete_id === id);
+  return found ? found.name : id;
+}
+async function loadDashboard() {
+  const response = await fetch('/api/dashboard');
+  const board = await response.json();
+  document.getElementById('result').textContent = JSON.stringify(board, null, 2);
+
+  const wBody = document.getElementById('whereabouts-body');
+  wBody.innerHTML = (board.whereabouts || []).map(row => '<tr>'
+    + '<td>' + esc(athleteName(board, row.athlete_id)) + '</td>'
+    + '<td>' + esc(row.period) + '</td>'
+    + '<td>' + tag(row.status) + '</td>'
+    + '<td>v' + esc(row.version) + '</td>'
+    + '<td>' + esc(row.version_count) + '</td>'
+    + '<td>' + esc(row.current_location) + '</td>'
+    + '<td>' + esc(row.current_window ? row.current_window.join(' 至 ') : '-') + '</td>'
+    + '</tr>').join('') || '<tr><td colspan="7">暂无申报</td></tr>';
+
+  const dBody = document.getElementById('dispatches-body');
+  dBody.innerHTML = (board.dispatches || []).map(row => '<tr>'
+    + '<td>' + esc(athleteName(board, row.athlete_id)) + '</td>'
+    + '<td>' + esc(row.period) + '</td>'
+    + '<td>' + esc(row.check_at) + '</td>'
+    + '<td>' + esc(row.location) + '</td>'
+    + '<td>v' + esc(row.version_no) + '</td>'
+    + '<td>' + tag(row.status) + '</td>'
+    + '<td class="' + esc(row.outcome || '') + '">' + esc(row.outcome || '-') + '</td>'
+    + '<td>' + esc(row.review_id || '-') + '</td>'
+    + '</tr>').join('') || '<tr><td colspan="8">暂无派单</td></tr>';
+
+  const cBody = document.getElementById('counts-body');
+  cBody.innerHTML = (board.athletes || []).map(row => '<tr>'
+    + '<td>' + esc(row.name) + '</td>'
+    + '<td>' + tag(row.status) + '</td>'
+    + '<td>' + esc(row.dispatch_total) + '</td>'
+    + '<td>' + esc(row.miss_total) + '</td>'
+    + '<td>' + esc(row.misses_trailing_12m) + '</td>'
+    + '<td>' + (row.pending_reviews.length ? row.pending_reviews.map(tag).join(' ') : '-') + '</td>'
+    + '</tr>').join('');
 }
 </script>
 </body>
